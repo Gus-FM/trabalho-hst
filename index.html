@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Jogo educativo sobre as Normas Regulamentadoras (NRs) de segurança do trabalho.">
+  <title>Simulador de Segurança do Trabalho — NRs</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <a class="pular-conteudo" href="#palco">Pular para o conteúdo</a>
+  <header class="hud" aria-label="Painel da empresa">
+    <div class="hud-marca">
+      <span class="hud-logo" aria-hidden="true">⚠</span>
+      <span>Metalúrgica Horizonte</span>
+    </div>
+    <div class="hud-item" id="hud-item-dias">
+      <span class="hud-rotulo">Dias sem acidentes</span>
+      <strong class="hud-valor" id="hud-dias">0</strong>
+    </div>
+    <div class="hud-item hud-item-indice">
+      <span class="hud-rotulo">Índice de segurança</span>
+      <div class="hud-indice-linha">
+        <div class="barra" role="progressbar" aria-label="Índice de segurança" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" id="hud-indice-barra">
+          <div class="barra-preenchimento" id="hud-indice-preenchimento"></div>
+        </div>
+        <strong class="hud-valor" id="hud-indice">50</strong>
+      </div>
+    </div>
+    <div class="hud-item">
+      <span class="hud-rotulo">Cargo</span>
+      <strong class="hud-valor hud-cargo" id="hud-cargo">Estagiário(a)</strong>
+    </div>
+    <div class="hud-item">
+      <span class="hud-rotulo">Pontuação</span>
+      <strong class="hud-valor" id="hud-pontos">0</strong>
+    </div>
+  </header>
+  <main id="palco" tabindex="-1">
+    <noscript>
+      <p class="aviso-noscript">Este jogo precisa de JavaScript ativado no navegador.</p>
+    </noscript>
+  </main>
+  <div id="aviso-leitor" class="somente-leitor" aria-live="polite"></div>
+  <script src="js/data.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
