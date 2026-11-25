@@ -310,6 +310,22 @@ main { outline: none; }
 }
 .cena svg { display: block; width: 100%; height: auto; }
 .dica-rolagem { display: none; font-size: .85rem; color: var(--texto-suave); margin: .4rem 0 0; text-align: center; }
+
+.modo-lista { margin-top: .75rem; background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio); padding: .6rem .9rem; }
+.modo-lista summary { cursor: pointer; font-weight: 700; padding: .2rem 0; }
+.modo-lista summary:focus-visible { outline: 3px solid var(--azul); outline-offset: 3px; }
+.modo-lista p { margin: .5rem 0; font-size: .9rem; }
+.lista-areas { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
+.btn-area {
+  width: 100%; text-align: left; font: inherit; font-size: .95rem; padding: .55rem .75rem; cursor: pointer;
+  background: var(--fundo); color: var(--texto); border: 2px solid var(--borda); border-radius: 8px;
+}
+.btn-area:hover:not(:disabled) { border-color: var(--preto); }
+.btn-area:focus-visible { outline: 3px solid var(--azul); outline-offset: 2px; }
+.btn-area:disabled { cursor: default; }
+.btn-area.area-perigo { background: var(--vermelho-claro); border-color: var(--vermelho); }
+.btn-area.area-ok { background: var(--verde-claro); border-color: var(--verde); opacity: .8; }
+.area-status { font-weight: 700; }
 .cena-svg { cursor: crosshair; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
 
 .cena .alvo { fill: transparent; stroke: none; }

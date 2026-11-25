@@ -53,7 +53,7 @@
     return copia;
   }
 
-  const limitar = (v, min, max) => Math.min(max, Math.max(min, v));
+  function limitar(v, min, max) { return Math.min(max, Math.max(min, v)); }
   const fmt = (n) => Number(n).toLocaleString('pt-BR');
   const numeroNR = (nr) => { const m = /(\d+)/.exec(nr); return m ? Number(m[1]) : 999; };
 
@@ -127,6 +127,7 @@
           if (!p.setores || typeof p.setores !== 'object') p.setores = {};
           if (!p.aluno || typeof p.aluno !== 'object') p.aluno = { nome: '', turma: '' };
           p.indice = limitar(Number(p.indice) || 0, 0, 100);
+          p.pontosTotais = pontosDeCarreira(p);
           return p;
         }
       }
@@ -134,6 +135,14 @@
 
     }
     return padrao;
+  }
+
+  /* A carreira soma só a melhor pontuação de cada setor: rejogar o mesmo setor não "farma" pontos. */
+  function pontosDeCarreira(p) {
+    return Object.keys(p.setores || {}).reduce((total, id) => {
+      const reg = p.setores[id];
+      return total + (reg ? Number(reg.melhorPontuacao) || 0 : 0);
+    }, 0);
   }
 
   function salvarProgresso() {
@@ -144,13 +153,41 @@
     }
   }
 
-  function cargoPorPontos(pontos) {
+  /* Um cargo exige pontos de carreira E um número mínimo de setores concluídos. */
+  function setoresConcluidos() {
+    return Object.keys(progresso.setores).filter((id) => progresso.setores[id] && progresso.setores[id].vezesJogado > 0).length;
+  }
+
+  const atendeCargo = (c, pontos, setores) => pontos >= c.minimo && setores >= (c.setores || 0);
+
+  function cargoPara(pontos, setores) {
     let atual = DADOS.cargos[0];
-    for (const c of DADOS.cargos) if (pontos >= c.minimo) atual = c;
+    for (const c of DADOS.cargos) {
+      if (!atendeCargo(c, pontos, setores)) break;
+      atual = c;
+    }
     return atual;
   }
 
-  const proximoCargo = (pontos) => DADOS.cargos.find((c) => c.minimo > pontos) || null;
+  function proximoCargoPara(pontos, setores) {
+    return DADOS.cargos[DADOS.cargos.indexOf(cargoPara(pontos, setores)) + 1] || null;
+  }
+
+  function textoFaltaCargo(prox, pontos, setores) {
+    const partes = [];
+    if (pontos < prox.minimo) partes.push(fmt(prox.minimo - pontos) + ' pontos');
+    const faltaSetores = (prox.setores || 0) - setores;
+    if (faltaSetores > 0) partes.push(faltaSetores + (faltaSetores === 1 ? ' setor concluído' : ' setores concluídos'));
+    return 'Faltam ' + partes.join(' e ') + ' para ' + prox.nome + '.';
+  }
+
+  function progressoCargo(prox, cargo, pontos, setores) {
+    if (!prox) return 100;
+    const fp = (pontos - cargo.minimo) / (prox.minimo - cargo.minimo);
+    const ds = (prox.setores || 0) - (cargo.setores || 0);
+    const fs = ds > 0 ? (setores - (cargo.setores || 0)) / ds : 1;
+    return Math.round(limitar(Math.min(fp, fs), 0, 1) * 100);
+  }
 
   const hudEl = {
     dias: document.getElementById('hud-dias'),
@@ -182,7 +219,7 @@
     hudEl.preenchimento.style.width = novo.indice + '%';
     hudEl.barra.className = 'barra ' + classeIndice(novo.indice);
     hudEl.barra.setAttribute('aria-valuenow', String(novo.indice));
-    hudEl.cargo.textContent = cargoPorPontos(novo.pontos).nome;
+    hudEl.cargo.textContent = cargoPara(novo.pontos, setoresConcluidos()).nome;
     hudExibido = novo;
   }
 
@@ -274,9 +311,10 @@
 
     const cartoes = DADOS.setores.map(cartaoSetor);
     const pontos = progresso.pontosTotais;
-    const cargo = cargoPorPontos(pontos);
-    const prox = proximoCargo(pontos);
-    const pctCargo = prox ? Math.round(((pontos - cargo.minimo) / (prox.minimo - cargo.minimo)) * 100) : 100;
+    const nSetores = setoresConcluidos();
+    const cargo = cargoPara(pontos, nSetores);
+    const prox = proximoCargoPara(pontos, nSetores);
+    const pctCargo = progressoCargo(prox, cargo, pontos, nSetores);
 
     const ultimoRel = Object.keys(progresso.setores)
       .map((id) => progresso.setores[id] && progresso.setores[id].ultimoRelatorio)
@@ -296,10 +334,13 @@
             h('div', { class: 'barra barra-cargo', role: 'progressbar', 'aria-label': 'Progresso até o próximo cargo', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pctCargo) },
               h('div', { class: 'barra-preenchimento', style: 'width:' + pctCargo + '%' })),
             h('p', { class: 'texto-suave' }, prox
-              ? 'Faltam ' + fmt(prox.minimo - pontos) + ' pontos para ' + prox.nome + '.'
+              ? textoFaltaCargo(prox, pontos, nSetores)
               : 'Você chegou ao topo da carreira!'),
+            h('p', { class: 'texto-suave' }, 'Pontos de carreira: ' + fmt(pontos) + ' · setores concluídos: ' + nSetores + ' de ' +
+              DADOS.setores.filter((s) => s.disponivel).length),
             h('ul', { class: 'lista-cargos' }, DADOS.cargos.map((c) =>
-              h('li', { class: pontos >= c.minimo ? 'alcancado' : '' }, c.nome, h('span', null, fmt(c.minimo) + ' pts'))))
+              h('li', { class: atendeCargo(c, pontos, nSetores) ? 'alcancado' : '' }, c.nome,
+                h('span', null, fmt(c.minimo) + ' pts' + (c.setores ? ' · ' + c.setores + (c.setores === 1 ? ' setor' : ' setores') : '')))))
           ),
           h('div', { class: 'cartao' },
             h('h2', null, 'Medalhas'),
@@ -338,6 +379,14 @@
         h('span', { class: 'setor-cadeado', 'aria-hidden': 'true' }, '🔒'));
     }
 
+    const anterior = setorAnterior(s);
+    if (anterior && !progresso.setores[anterior.id]) {
+      return h('div', { class: 'setor bloqueado', role: 'listitem', 'aria-label': s.nome + ': bloqueado até concluir ' + anterior.nome },
+        conteudo,
+        h('span', { class: 'selo-em-breve' }, 'Conclua ' + anterior.nome),
+        h('span', { class: 'setor-cadeado', 'aria-hidden': 'true' }, '🔒'));
+    }
+
     return h('div', { role: 'listitem', class: 'setor-item' },
       h('button', { type: 'button', class: 'setor disponivel', onclick: () => iniciarFase(s.id) },
         conteudo,
@@ -345,6 +394,18 @@
           ? 'Melhor pontuação: ' + fmt(reg.melhorPontuacao) + ' · jogado ' + reg.vezesJogado + 'x'
           : 'Ainda não inspecionado'),
         h('span', { class: 'btn btn-primario btn-falso' }, reg ? 'Inspecionar de novo' : 'Inspecionar')));
+  }
+
+  /* Os setores são liberados em sequência: cada um exige ter concluído o setor disponível anterior. */
+  function setorAnterior(s) {
+    const disponiveis = DADOS.setores.filter((x) => x.disponivel);
+    const i = disponiveis.indexOf(s);
+    return i > 0 ? disponiveis[i - 1] : null;
+  }
+
+  function setorLiberado(s) {
+    const anterior = setorAnterior(s);
+    return !anterior || !!progresso.setores[anterior.id];
   }
 
   async function reiniciarProgresso() {
@@ -366,17 +427,24 @@
 
   function iniciarFase(idSetor) {
     const setor = DADOS.setores.find((s) => s.id === idSetor && s.disponivel);
-    if (!setor) return;
+    if (!setor || !setorLiberado(setor)) return;
+    const qtd = Math.min(CFG.perigosPorFase || setor.perigos.length, setor.perigos.length);
+    const sorteados = embaralhar(setor.perigos.map((p) => p.id)).slice(0, qtd);
     fase = {
       setor: setor,
+      perigos: setor.perigos.filter((p) => sorteados.indexOf(p.id) >= 0),
+      svg: montarCena(setor, sorteados),
+      tempo: setor.tempoInspecao || CFG.tempoInspecao,
       encontrados: [],
+      verificados: [],
       inspecaoEncerrada: false,
       motivoFim: null,
       inicio: 0,
       fimPrevisto: 0,
       cronometro: null,
       tempoTodos: null,
-      cliquesSemPerigo: 0,
+      cliquesErrados: 0,
+      usouLista: false,
       avaliacoes: {},
       acoes: {},
       ordemOpcoes: {},
@@ -386,6 +454,25 @@
       resultado: null
     };
     telaBriefing();
+  }
+
+  /* Setores novos montam o cenário conforme os perigos sorteados; os não sorteados aparecem na versão segura. */
+  function montarCena(setor, idsAtivos) {
+    return typeof setor.cenario.montar === 'function' ? setor.cenario.montar(idsAtivos) : setor.cenario.svg;
+  }
+
+  function recalcularIdentificar() {
+    fase.pontos.identificar = Math.max(0,
+      fase.encontrados.length * CFG.pontos.perigoEncontrado - fase.cliquesErrados * CFG.pontos.cliqueErrado);
+  }
+
+  function mensagemSemPerigo(idOk) {
+    const s = fase.setor;
+    const ok = idOk && (s.naoPerigos || []).find((n) => n.id === idOk);
+    if (ok) return ok.mensagem;
+    const seguro = idOk && s.perigos.find((p) => p.id === idOk && p.mensagemSeguro);
+    if (seguro) return seguro.mensagemSeguro;
+    return s.cenario.mensagemPadrao || DADOS.textos.semPerigo;
   }
 
   const totalFase = () => fase ? fase.pontos.identificar + fase.pontos.avaliar + fase.pontos.resolver + fase.pontos.quiz : 0;
@@ -438,8 +525,10 @@
         h('p', { class: 'setor-nrs' }, 'NRs envolvidas: ' + s.nrs.join(', ')),
         h('p', null, s.briefing),
         h('ul', { class: 'lista-dicas' },
-          h('li', null, 'Você tem ', h('strong', null, CFG.tempoInspecao + ' segundos'), '.'),
-          h('li', null, 'Há ', h('strong', null, s.perigos.length + ' perigos'), ' para encontrar.'),
+          h('li', null, 'Você tem ', h('strong', null, fase.tempo + ' segundos'), '.'),
+          h('li', null, 'Há ', h('strong', null, fase.perigos.length + ' perigos'), ' para encontrar.',
+            s.perigos.length > fase.perigos.length ? ' Eles são sorteados: a cada inspeção, o setor muda.' : ''),
+          h('li', null, 'Cada clique em algo sem perigo custa ', h('strong', null, CFG.segundosCliqueErrado + ' segundos e ' + CFG.pontos.cliqueErrado + ' pontos'), '. Observe antes de clicar.'),
           h('li', null, 'Perigo que ficar de fora pode virar acidente no dia seguinte.')),
         h('div', { class: 'acoes-etapa' },
           h('button', { type: 'button', class: 'btn btn-primario btn-grande', onclick: etapaIdentificar }, 'Iniciar inspeção'))
@@ -449,9 +538,9 @@
 
   function etapaIdentificar() {
     const setor = fase.setor;
-    const total = setor.perigos.length;
+    const total = fase.perigos.length;
 
-    const cena = h('div', { class: 'cena', html: setor.cenario.svg });
+    const cena = h('div', { class: 'cena', html: fase.svg });
     const svg = cena.querySelector('svg');
     svg.classList.add('cena-svg');
     svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
@@ -463,7 +552,7 @@
     const listaVazia = h('p', { class: 'lista-vazia' }, 'Nenhum perigo encontrado ainda.');
     const lista = h('ol', { class: 'lista-encontrados' });
     const contador = h('strong', { class: 'contador' }, '0 de ' + total);
-    const tempoTexto = h('span', { class: 'relogio-numero' }, formatarTempo(CFG.tempoInspecao));
+    const tempoTexto = h('span', { class: 'relogio-numero' }, formatarTempo(fase.tempo));
     const tempoBarra = h('div', { class: 'barra-preenchimento' });
     const relogio = h('div', { class: 'relogio', role: 'timer', 'aria-label': 'Tempo restante' },
       h('span', { class: 'relogio-icone', 'aria-hidden': 'true' }, '⏱'), tempoTexto,
@@ -478,22 +567,32 @@
       temporizadorAviso = setTimeout(() => aviso.classList.remove('visivel'), 2400);
     }
 
-    svg.addEventListener('click', (ev) => {
-      if (!fase || fase.inspecaoEncerrada) return;
-      const grupoPerigo = ev.target.closest('[data-perigo]');
+    const botoesArea = {};
+    function marcarArea(id, tipo) {
+      const b = botoesArea[id];
+      if (!b || b.disabled) return;
+      b.disabled = true;
+      b.classList.add(tipo === 'perigo' ? 'area-perigo' : 'area-ok');
+      b.append(h('span', { class: 'area-status' }, tipo === 'perigo' ? ' · perigo registrado' : ' · sem perigo'));
+    }
 
-      if (grupoPerigo) {
-        const id = grupoPerigo.getAttribute('data-perigo');
-        const p = perigoPorId(id);
+    /* Trata o clique no cenário ou a escolha no modo lista. grupo = <g data-perigo> ou <g data-ok>, ou null (área vazia). */
+    function registrar(grupo, ev) {
+      if (!fase || fase.inspecaoEncerrada) return;
+      const idPerigo = grupo ? grupo.getAttribute('data-perigo') : null;
+
+      if (idPerigo) {
+        const p = perigoPorId(idPerigo);
         if (!p) return;
-        if (fase.encontrados.indexOf(id) >= 0) {
+        if (fase.encontrados.indexOf(idPerigo) >= 0) {
           mostrarAviso('Você já registrou este perigo.', 'info');
           return;
         }
-        fase.encontrados.push(id);
-        fase.pontos.identificar += CFG.pontos.perigoEncontrado;
-        grupoPerigo.classList.add('encontrado');
-        marcarNumero(svg, grupoPerigo, fase.encontrados.length);
+        fase.encontrados.push(idPerigo);
+        recalcularIdentificar();
+        grupo.classList.add('encontrado');
+        marcarNumero(svg, grupo, fase.encontrados.length);
+        marcarArea(idPerigo, 'perigo');
         listaVazia.remove();
         lista.append(h('li', { class: 'novo' }, p.nome));
         contador.textContent = fase.encontrados.length + ' de ' + total;
@@ -510,12 +609,37 @@
         return;
       }
 
-      fase.cliquesSemPerigo++;
-      const grupoOk = ev.target.closest('[data-ok]');
-      const item = grupoOk && (setor.naoPerigos || []).find((n) => n.id === grupoOk.getAttribute('data-ok'));
-      mostrarAviso(item ? item.mensagem : (setor.cenario.mensagemPadrao || DADOS.textos.semPerigo), 'ok');
-      marcarToque(svg, ev);
-    });
+      const idOk = grupo ? grupo.getAttribute('data-ok') : null;
+      if (idOk && fase.verificados.indexOf(idOk) >= 0) {
+        mostrarAviso('Você já verificou este ponto: não há perigo aqui.', 'info');
+        return;
+      }
+      if (idOk) fase.verificados.push(idOk);
+      fase.cliquesErrados++;
+      fase.fimPrevisto -= CFG.segundosCliqueErrado * 1000;
+      recalcularIdentificar();
+      atualizarPontosFase();
+      marcarArea(idOk, 'ok');
+      mostrarAviso(mensagemSemPerigo(idOk) + ' (−' + CFG.segundosCliqueErrado + ' s, −' + CFG.pontos.cliqueErrado + ' pontos)', 'ok');
+      if (ev) marcarToque(svg, ev);
+      tique();
+    }
+
+    svg.addEventListener('click', (ev) => registrar(ev.target.closest('[data-perigo], [data-ok]'), ev));
+
+    const areas = embaralhar(Array.prototype.slice.call(svg.querySelectorAll('[data-perigo], [data-ok]')));
+    const modoLista = h('details', { class: 'modo-lista' },
+      h('summary', null, 'Inspecionar pela lista (teclado ou leitor de tela)'),
+      h('p', { class: 'texto-suave' }, 'Cada item descreve uma parte do cenário. Escolha só os que oferecem perigo: ' +
+        'cada item sem perigo custa ' + CFG.segundosCliqueErrado + ' segundos e ' + CFG.pontos.cliqueErrado + ' pontos. ' +
+        'O uso do modo lista fica registrado no relatório.'),
+      h('ul', { class: 'lista-areas' }, areas.map((g) => {
+        const id = g.getAttribute('data-perigo') || g.getAttribute('data-ok');
+        const b = h('button', { type: 'button', class: 'btn-area', onclick: () => { fase.usouLista = true; registrar(g, null); } },
+          g.getAttribute('data-descricao') || id);
+        botoesArea[id] = b;
+        return h('li', null, b);
+      })));
 
     async function pedirEncerramento() {
       if (!fase || fase.inspecaoEncerrada) return;
@@ -540,7 +664,7 @@
           relogio
         ),
         h('div', { class: 'identificar-grade' },
-          h('div', null, cenaMoldura, dicaRolagem),
+          h('div', null, cenaMoldura, dicaRolagem, modoLista),
           h('aside', { class: 'painel-encontrados cartao', 'aria-label': 'Perigos encontrados' },
             h('h2', null, 'Perigos encontrados'),
             h('p', null, contador),
@@ -552,13 +676,13 @@
     );
 
     fase.inicio = Date.now();
-    fase.fimPrevisto = fase.inicio + CFG.tempoInspecao * 1000;
+    fase.fimPrevisto = fase.inicio + fase.tempo * 1000;
     function tique() {
       if (!fase || fase.inspecaoEncerrada) return;
       const restanteMs = Math.max(0, fase.fimPrevisto - Date.now());
       const seg = Math.ceil(restanteMs / 1000);
       tempoTexto.textContent = formatarTempo(seg);
-      tempoBarra.style.width = (restanteMs / (CFG.tempoInspecao * 1000)) * 100 + '%';
+      tempoBarra.style.width = (restanteMs / (fase.tempo * 1000)) * 100 + '%';
       relogio.classList.toggle('acabando', seg <= 15);
       if (restanteMs <= 0) finalizarInspecao('tempo');
     }
@@ -610,7 +734,7 @@
     fecharModais();
 
     const n = fase.encontrados.length;
-    const total = fase.setor.perigos.length;
+    const total = fase.perigos.length;
     const titulos = { tempo: 'Tempo esgotado!', todos: 'Inspeção completa!', manual: 'Inspeção encerrada' };
     let msg;
     if (n === total) msg = 'Você encontrou todos os ' + total + ' perigos. Excelente trabalho!';
@@ -627,7 +751,7 @@
 
     const moldura = document.querySelector('.cena-moldura');
     if (moldura) moldura.append(caixa);
-    document.querySelectorAll('.painel-encontrados .btn').forEach((b) => { b.disabled = true; });
+    document.querySelectorAll('.painel-encontrados .btn, .modo-lista button').forEach((b) => { b.disabled = true; });
     const tempoTexto = document.querySelector('.relogio-numero');
     if (tempoTexto && motivo === 'tempo') tempoTexto.textContent = '0:00';
     anunciar(titulos[motivo] + ' ' + msg);
@@ -637,7 +761,7 @@
 
   function miniaturaPerigo(p) {
     const modelo = document.createElement('template');
-    modelo.innerHTML = fase.setor.cenario.svg.trim();
+    modelo.innerHTML = fase.svg.trim();
     const svg = modelo.content.querySelector('svg');
     const grupo = svg && svg.querySelector('[data-perigo="' + p.id + '"]');
     const alvo = grupo && grupo.querySelector('.alvo');
@@ -890,18 +1014,21 @@
     if (fase.concluida) return;
     const setor = fase.setor;
     const encontrados = fase.encontrados;
-    const naoEncontrados = setor.perigos.filter((p) => encontrados.indexOf(p.id) < 0);
+    const naoEncontrados = fase.perigos.filter((p) => encontrados.indexOf(p.id) < 0);
     const acoesCorretas = encontrados.filter((id) => fase.acoes[id] && fase.acoes[id].correta).length;
     const avaliacoesExatas = encontrados.filter((id) => fase.avaliacoes[id] && fase.avaliacoes[id].distancia === 0).length;
     const avaliacoesParciais = encontrados.filter((id) => fase.avaliacoes[id] && fase.avaliacoes[id].distancia === 1).length;
     const quizAcertos = fase.quiz.filter((r) => r && r.acertou).length;
     const pontosFase = totalFase();
 
+    const setoresAntes = setoresConcluidos();
+    const setoresDepois = setoresAntes + (progresso.setores[setor.id] ? 0 : 1);
     const antes = {
       indice: progresso.indice,
       dias: progresso.diasSemAcidentes,
       pontos: progresso.pontosTotais,
-      cargo: cargoPorPontos(progresso.pontosTotais).nome
+      setores: setoresAntes,
+      cargo: cargoPara(progresso.pontosTotais, setoresAntes).nome
     };
 
     let deltaIndice = acoesCorretas * CFG.indice.porAcaoCorreta;
@@ -909,11 +1036,14 @@
     else deltaIndice += CFG.indice.bonusSemAcidentes;
     progresso.indice = limitar(progresso.indice + deltaIndice, 0, 100);
     progresso.diasSemAcidentes = naoEncontrados.length > 0 ? 0 : progresso.diasSemAcidentes + CFG.diasPorFase;
-    progresso.pontosTotais += pontosFase;
+    const reg = progresso.setores[setor.id] || { melhorPontuacao: 0, vezesJogado: 0 };
+    const melhorAntes = reg.melhorPontuacao || 0;
+    const ganhoCarreira = Math.max(0, pontosFase - melhorAntes);
+    progresso.pontosTotais += ganhoCarreira;
     progresso.fasesJogadas += 1;
 
     const contexto = {
-      totalPerigos: setor.perigos.length,
+      totalPerigos: fase.perigos.length,
       naoEncontrados: naoEncontrados,
       tempoTodos: fase.tempoTodos,
       acoesCorretas: acoesCorretas,
@@ -932,7 +1062,8 @@
       indice: progresso.indice,
       dias: progresso.diasSemAcidentes,
       pontos: progresso.pontosTotais,
-      cargo: cargoPorPontos(progresso.pontosTotais).nome
+      setores: setoresDepois,
+      cargo: cargoPara(progresso.pontosTotais, setoresDepois).nome
     };
 
     const revisar = {};
@@ -959,12 +1090,13 @@
       data: new Date().toISOString(),
       pontos: Object.assign({}, fase.pontos),
       pontosFase: pontosFase,
-      pontosMaximos: setor.perigos.length * (CFG.pontos.perigoEncontrado + CFG.pontos.avaliacaoExata + CFG.pontos.acaoCorreta) + setor.quiz.length * CFG.pontos.quizCorreta,
-      identificar: { acertos: encontrados.length, total: setor.perigos.length, tempoTodos: fase.tempoTodos },
+      pontosMaximos: fase.perigos.length * (CFG.pontos.perigoEncontrado + CFG.pontos.avaliacaoExata + CFG.pontos.acaoCorreta) + setor.quiz.length * CFG.pontos.quizCorreta,
+      identificar: { acertos: encontrados.length, total: fase.perigos.length, tempoTodos: fase.tempoTodos, cliquesErrados: fase.cliquesErrados, usouLista: fase.usouLista },
+      ganhoCarreira: ganhoCarreira,
       avaliar: { exatas: avaliacoesExatas, parciais: avaliacoesParciais, total: encontrados.length },
       resolver: { acertos: acoesCorretas, total: encontrados.length },
       quiz: { acertos: quizAcertos, total: setor.quiz.length },
-      perigos: setor.perigos.map((p) => {
+      perigos: fase.perigos.map((p) => {
         const achou = encontrados.indexOf(p.id) >= 0;
         const av = fase.avaliacoes[p.id];
         const ac = fase.acoes[p.id];
@@ -987,8 +1119,7 @@
       pontosTotais: depois.pontos
     };
 
-    const reg = progresso.setores[setor.id] || { melhorPontuacao: 0, vezesJogado: 0 };
-    reg.melhorPontuacao = Math.max(reg.melhorPontuacao || 0, pontosFase);
+    reg.melhorPontuacao = Math.max(melhorAntes, pontosFase);
     reg.vezesJogado = (reg.vezesJogado || 0) + 1;
     reg.ultimoRelatorio = relatorio;
     progresso.setores[setor.id] = reg;
@@ -1004,7 +1135,9 @@
       medalhasGanhas: medalhasGanhas,
       medalhasNovas: medalhasNovas,
       relatorio: relatorio,
-      melhorPontuacao: reg.melhorPontuacao
+      melhorPontuacao: reg.melhorPontuacao,
+      melhorAntes: melhorAntes,
+      ganhoCarreira: ganhoCarreira
     };
   }
 
@@ -1083,10 +1216,12 @@
     const r = fase.resultado;
     const rel = r.relatorio;
     const promovido = r.antes.cargo !== r.depois.cargo;
-    const prox = proximoCargo(r.depois.pontos);
+    const prox = proximoCargoPara(r.depois.pontos, r.depois.setores);
 
     const linhas = [
-      ['Identificar', rel.identificar.acertos + ' de ' + rel.identificar.total + ' perigos', rel.pontos.identificar],
+      ['Identificar', rel.identificar.acertos + ' de ' + rel.identificar.total + ' perigos' +
+        (rel.identificar.cliquesErrados ? ', ' + rel.identificar.cliquesErrados + ' clique(s) sem perigo' : '') +
+        (rel.identificar.usouLista ? ' (modo lista)' : ''), rel.pontos.identificar],
       ['Avaliar', rel.avaliar.exatas + ' de ' + rel.avaliar.total + ' exatas' + (rel.avaliar.parciais ? ', ' + rel.avaliar.parciais + ' com uma casa de diferença' : ''), rel.pontos.avaliar],
       ['Resolver', rel.resolver.acertos + ' de ' + rel.resolver.total + ' ações corretas', rel.pontos.resolver],
       ['Quiz', rel.quiz.acertos + ' de ' + rel.quiz.total + ' acertos', rel.pontos.quiz]
@@ -1100,6 +1235,10 @@
           h('p', { class: 'placar-rotulo' }, 'Pontuação no ' + fase.setor.nome.toLowerCase()),
           h('p', { class: 'placar-numero' }, fmt(rel.pontosFase), h('small', null, ' / ' + fmt(rel.pontosMaximos))),
           h('p', { class: 'texto-suave' }, 'Melhor pontuação neste setor: ' + fmt(r.melhorPontuacao)),
+          h('p', null, 'Pontos de carreira ganhos: ', h('strong', null, '+' + fmt(r.ganhoCarreira)),
+            h('span', { class: 'texto-suave' }, r.melhorAntes > 0
+              ? ' (na carreira conta só a sua melhor pontuação em cada setor, então só soma o que passar de ' + fmt(r.melhorAntes) + ')'
+              : ' (na carreira conta só a sua melhor pontuação em cada setor)')),
           h('table', { class: 'tabela' },
             h('thead', null, h('tr', null, h('th', { scope: 'col' }, 'Etapa'), h('th', { scope: 'col' }, 'Desempenho'), h('th', { scope: 'col', class: 'num' }, 'Pontos'))),
             h('tbody', null, linhas.map((l) => h('tr', null, h('th', { scope: 'row' }, l[0]), h('td', null, l[1]), h('td', { class: 'num' }, fmt(l[2]))))),
@@ -1121,7 +1260,8 @@
           promovido
             ? h('p', null, 'Você passou de ', h('strong', null, r.antes.cargo), ' para ', h('strong', null, r.depois.cargo), '.')
             : h('p', null, 'Cargo atual: ', h('strong', null, r.depois.cargo), '.'),
-          h('p', { class: 'texto-suave' }, 'Pontuação acumulada: ' + fmt(r.depois.pontos) + (prox ? ' · faltam ' + fmt(prox.minimo - r.depois.pontos) + ' para ' + prox.nome : ''))
+          h('p', { class: 'texto-suave' }, 'Pontos de carreira: ' + fmt(r.depois.pontos) + ' · setores concluídos: ' + r.depois.setores + '. ' +
+            (prox ? textoFaltaCargo(prox, r.depois.pontos, r.depois.setores) : 'Você chegou ao topo da carreira!'))
         ),
 
         h('div', { class: 'acoes-etapa' },
@@ -1198,6 +1338,10 @@
         h('ul', { class: 'rel-resumo' },
           h('li', null, 'Pontuação na fase: ', h('strong', null, fmt(rel.pontosFase) + ' de ' + fmt(rel.pontosMaximos))),
           h('li', null, 'Acidentes causados por perigos não identificados: ', h('strong', null, String(rel.acidentes))),
+          h('li', null, 'Cliques em pontos sem perigo durante a inspeção: ', h('strong', null, String(rel.identificar.cliquesErrados || 0))),
+          h('li', null, 'Forma de inspeção: ', h('strong', null, rel.identificar.usouLista
+            ? 'usou o modo lista (descrições em texto)'
+            : 'só pelo cenário desenhado')),
           h('li', null, 'Medalhas: ', h('strong', null, rel.medalhas.length ? rel.medalhas.join(', ') : 'nenhuma')),
           h('li', null, 'Cargo ao final: ', h('strong', null, rel.cargo), ' (' + fmt(rel.pontosTotais) + ' pontos acumulados)')),
 
@@ -1214,9 +1358,17 @@
   function verificarDados() {
     const avisos = [];
     DADOS.setores.filter((s) => s.disponivel).forEach((s) => {
-      if (!s.cenario || !s.cenario.svg) { avisos.push(s.id + ': falta cenario.svg'); return; }
+      if (!s.cenario || (!s.cenario.svg && typeof s.cenario.montar !== 'function')) { avisos.push(s.id + ': falta cenario.svg ou cenario.montar'); return; }
+      const todos = (s.perigos || []).map((p) => p.id);
       const modelo = document.createElement('template');
-      modelo.innerHTML = s.cenario.svg.trim();
+      modelo.innerHTML = montarCena(s, todos).trim();
+      if (typeof s.cenario.montar === 'function') {
+        const seguro = document.createElement('template');
+        seguro.innerHTML = s.cenario.montar([]).trim();
+        if (seguro.content.querySelector('[data-perigo]')) avisos.push(s.id + ': cenário sem perigos sorteados ainda mostra perigo');
+        todos.forEach((id) => { if (!seguro.content.querySelector('[data-ok="' + id + '"]')) avisos.push(s.id + '/' + id + ': falta a versão segura'); });
+        seguro.content.querySelectorAll('[data-ok]').forEach((g) => { if (!g.getAttribute('data-descricao')) avisos.push(s.id + ': área sem descrição ' + g.getAttribute('data-ok')); });
+      }
       (s.perigos || []).forEach((p) => {
         const g = modelo.content.querySelector('[data-perigo="' + p.id + '"]');
         if (!g) avisos.push(s.id + '/' + p.id + ': não há <g data-perigo="' + p.id + '"> no SVG');
